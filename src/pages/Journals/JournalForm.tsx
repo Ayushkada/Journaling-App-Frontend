@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
-import { Edit, Save, Trash2 } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import Picker from "@emoji-mart/react";
 import data from "@emoji-mart/data";
 import type {
@@ -17,7 +17,7 @@ import {
 } from "@/lib/journalService";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfimDialog";
-import { format, formatDistanceToNowStrict } from "date-fns";
+import { format } from "date-fns";
 import { getUpdatedText, navigateWithUnsavedCheck } from "@/utils/helpers";
 
 interface OutletContext {

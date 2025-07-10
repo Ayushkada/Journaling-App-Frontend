@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { Edit, Trash2 } from "lucide-react";
 import { useIsMobile } from "@/hooks/useMobile";
-import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { GoalBase } from "@/types/goal";
 import type { JournalEntryBase } from "@/types/journal";
@@ -12,10 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Progress } from "@/components/ui/Progress";
 import { format, formatDistanceToNowStrict } from "date-fns";
 import { getCategoryColor } from "@/utils/helpers";
-import {
-  baseCategoryColors,
-  fallbackCategoryColors,
-} from "@/config/categoryColors";
+import { Button } from "@/components/ui/Button";
 
 type OutletCtx = {
   goals: GoalBase[];

@@ -1,13 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useIsMobile } from "@/hooks/useMobile";
-import { GoogleIcon } from "@/components/icons/GoogleIcon";
-import { AppleIcon } from "@/components/icons/AppleIcon";
 import { Eye, EyeOff } from "lucide-react";
 
 import type { UserCreate } from "@/types/auth";
 import { useAuth } from "@/provider";
-
-import { useNavigate } from "react-router-dom";
 
 const Auth = () => {
   const isMobile = useIsMobile();

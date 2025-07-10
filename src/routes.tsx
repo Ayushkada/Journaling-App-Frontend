@@ -10,8 +10,6 @@ import Profile from "@/pages/Profile";
 import NotFound from "@/pages/NotFound";
 import DashboardLayout from "@/pages/DashboardLayout";
 
-import AuthGuard from "@/guards/AuthGuard";
-import GuestGuard from "@/guards/GuestGuard";
 import JournalForm from "./pages/Journals/JournalForm";
 import JournalView from "@/pages/Journals/JournalView";
 import GoalForm from "@/pages/Goals/GoalForm";
@@ -19,6 +17,8 @@ import GoalLayout from "./pages/Goals/GoalLayout";
 import JournalLayout from "./pages/Journals/JournalLayout";
 import MainNavLayout from "./pages/MainNavLayout";
 import GoalView from "./pages/Goals/GoalView";
+import GuestGuard from "./guards/GuestGuard";
+import AuthGuard from "./guards/AuthGuard";
 
 export const routes: RouteObject[] = [
   {

@@ -16,7 +16,7 @@ export const setAccessToken = (token: string | null) => {
 };
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://localhost:8000",
+  baseURL: "https://ave-refugees-entertainment-malaysia.trycloudflare.com",
   withCredentials: true, // send refresh-token cookie
 });
 

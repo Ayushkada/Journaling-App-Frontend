@@ -1,14 +1,14 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { Loader2 } from "lucide-react";
 import { Save, Trash2 } from "lucide-react";
 import Picker from "@emoji-mart/react";
 import data from "@emoji-mart/data";
 import type {
   JournalEntryCreate,
-  JournalEntryBase,
   JournalEntryUpdate,
+  JournalEntryBase,
 } from "@/types/journal";
-import { useIsMobile } from "@/hooks/useMobile";
 import {
   createJournal,
   deleteJournal,
@@ -16,27 +16,26 @@ import {
   updateJournal,
 } from "@/lib/journalService";
 import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { format } from "date-fns";
 import { getUpdatedText, navigateWithUnsavedCheck } from "@/utils/helpers";
-
-interface OutletContext {
-  journals: JournalEntryBase[];
-  setJournals: React.Dispatch<React.SetStateAction<JournalEntryBase[]>>;
-  setJournalTitle: (title: string) => void;
-  setHasUnsavedChanges: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingNav: (link: string) => void;
-  hasUnsavedChanges: boolean;
-}
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { JournalLayoutContext } from "./JournalLayout";
 
 const JournalForm: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams<{ id?: string }>();
   const isEditing = Boolean(id);
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
 
-  const [loading, setLoading] = useState(isEditing);
-  const [journal, setJournal] = useState<JournalEntryBase | null>(null);
+  // Context from layout
+  const {
+    journals,
+    setJournalTitle,
+    hasUnsavedChanges,
+    setHasUnsavedChanges,
+    setPendingNav,
+  } = useOutletContext<JournalLayoutContext>();
+
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [mood, setMood] = useState<string[]>([]);
@@ -47,32 +46,35 @@ const JournalForm: React.FC = () => {
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
 
+  const queryClient = useQueryClient();
+
+  // Fetch current journal (for editing only)
   const {
-    journals,
-    setJournals,
-    setJournalTitle,
-    setHasUnsavedChanges,
-    setPendingNav,
-    hasUnsavedChanges,
-  } = useOutletContext<OutletContext>();
+    data: journal,
+    isLoading,
+    error,
+  } = useQuery<JournalEntryBase>({
+    queryKey: ["journal", id],
+    queryFn: () => getJournalById(id!),
+    enabled: isEditing && !!id,
+  });
 
-  // Auth & initial load
   useEffect(() => {
-    if (isEditing && id) {
-      getJournalById(id)
-        .then((j) => {
-          setJournal(j);
-          setTitle(j.title || "");
-          setContent(j.content);
-          setMood(j.emojis || []);
-          setImages(j.images || []);
-        })
-        .catch(console.error)
-        .finally(() => setLoading(false));
+    if (isEditing && journal) {
+      setTitle(journal.title || "");
+      setContent(journal.content || "");
+      setMood(journal.emojis || []);
+      setImages(journal.images || []);
+    } else if (!isEditing) {
+      // Reset all fields for 'Add New'
+      setTitle("");
+      setContent("");
+      setMood([]);
+      setImages([]);
     }
-  }, [isEditing, id]);
+  }, [isEditing, journal, id]);
 
-  // Sync title & dirty flag
+  // Keep the sidebar in sync with form's title input
   useEffect(() => {
     setJournalTitle(title);
     const isDirty =
@@ -85,7 +87,6 @@ const JournalForm: React.FC = () => {
           !!content.trim() ||
           mood.length > 0 ||
           images.length > 0;
-
     setHasUnsavedChanges(isDirty);
   }, [
     title,
@@ -94,11 +95,11 @@ const JournalForm: React.FC = () => {
     images,
     isEditing,
     journal,
-    setHasUnsavedChanges,
     setJournalTitle,
+    setHasUnsavedChanges,
   ]);
 
-  // Auto-expand textarea
+  // Auto-expand textarea as you type
   useEffect(() => {
     if (contentRef.current) {
       contentRef.current.style.height = "auto";
@@ -120,6 +121,57 @@ const JournalForm: React.FC = () => {
     return () => document.removeEventListener("mousedown", onClick);
   }, [showEmojiPicker]);
 
+  // Mutations
+  const createMutation = useMutation({
+    mutationFn: (payload: JournalEntryCreate) => createJournal(payload),
+    onSuccess: (created) => {
+      setHasUnsavedChanges(false);
+      setJournalTitle("");
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+      navigate(`/journals/${created.id}`);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: JournalEntryUpdate;
+    }) => updateJournal(id, payload),
+    onSuccess: () => {
+      setHasUnsavedChanges(false);
+      setJournalTitle("");
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+      queryClient.invalidateQueries({ queryKey: ["journal", id] });
+      navigate(`/journals/${id}`);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (journalId: string) => deleteJournal(journalId),
+    onSuccess: (_, deletedId) => {
+      setHasUnsavedChanges(false);
+      setJournalTitle("");
+      queryClient.setQueryData(["journals"], (old: JournalEntryBase[] = []) =>
+        old.filter((j) => j.id !== deletedId)
+      );
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+      queryClient.invalidateQueries({ queryKey: ["journal", deletedId] });
+      // Find newest journal to show after delete
+      const updated =
+        queryClient.getQueryData<JournalEntryBase[]>(["journals"]) || [];
+      const next = updated
+        .slice()
+        .sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        )[0];
+      navigate(next ? `/journals/${next.id}` : "/journals");
+    },
+  });
+
+  // Handle image upload
   const handleImageUpload = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files || []);
@@ -138,6 +190,7 @@ const JournalForm: React.FC = () => {
     []
   );
 
+  // Cancel logic: check for unsaved and fallback to newest
   const handleCancel = () => {
     setJournalTitle("");
     const fallback = [...journals].sort(
@@ -155,25 +208,16 @@ const JournalForm: React.FC = () => {
     );
   };
 
-  const handleDelete = async () => {
-    if (!journalToDelete) return;
-    try {
-      await deleteJournal(journalToDelete);
-      const updated = journals.filter((j) => j.id !== journalToDelete);
-      setJournals(updated);
-      const next = updated.sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      )[0];
-      navigate(next ? `/journals/${next.id}` : "/journals");
-    } catch (e) {
-      console.error(e);
-    } finally {
+  // Delete
+  const handleDelete = () => {
+    if (journalToDelete) {
+      deleteMutation.mutate(journalToDelete);
       setJournalToDelete(null);
-      setJournalTitle("");
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Submit (Create or Update)
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim()) return;
 
@@ -184,42 +228,36 @@ const JournalForm: React.FC = () => {
       images: images.length ? images : null,
     };
 
-    try {
-      if (isEditing && id) {
-        const updatePayload: JournalEntryUpdate = {
-          ...payload,
-          updated_date: new Date().toISOString(),
-        };
-        const updated = await updateJournal(id, updatePayload);
-        setJournals((prev) =>
-          prev.map((j) => (j.id === id ? { ...j, ...updated } : j))
-        );
-        navigate(`/journals/${id}`);
-      } else {
-        const createPayload: JournalEntryCreate = {
-          ...payload,
-          date: new Date().toISOString(),
-          source: "web",
-        };
-        const created = await createJournal(createPayload);
-        setJournals((prev) => [created, ...prev]);
-        navigate(`/journals/${created.id}`);
-      }
-    } catch (e) {
-      console.error("Failed to save journal:", e);
-    } finally {
-      setJournalTitle("");
-      setHasUnsavedChanges(false);
+    if (isEditing && id) {
+      const updatePayload: JournalEntryUpdate = {
+        ...payload,
+        updated_date: new Date().toISOString(),
+      };
+      updateMutation.mutate({ id, payload: updatePayload });
+    } else {
+      const createPayload: JournalEntryCreate = {
+        ...payload,
+        date: new Date().toISOString(),
+        source: "web",
+      };
+      createMutation.mutate(createPayload);
     }
   };
+
+  const isPending = isEditing
+    ? updateMutation.isPending
+    : createMutation.isPending;
+  const isDisabled = !content.trim() || isPending;
 
   return (
     <main className="min-h-screen bg-background flex" role="main">
       <section className="flex-1 p-8 w-full max-w-7xl mx-auto">
-        {loading ? (
+        {isLoading && !journal ? (
           <div className="min-h-screen flex items-center justify-center px-4">
             <p>Loading…</p>
           </div>
+        ) : error ? (
+          <div className="text-red-500">Failed to load journal.</div>
         ) : (
           <>
             <header className="flex flex-col sm:flex-row justify-between items-start gap-4">
@@ -248,11 +286,16 @@ const JournalForm: React.FC = () => {
                 <Button
                   size="icon"
                   variant="ghost"
+                  disabled={deleteMutation.isPending}
                   className="text-destructive hover:text-destructive"
                   onClick={() => journal?.id && setJournalToDelete(journal.id)}
                   aria-label="Delete journal entry"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  {deleteMutation.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Trash2 />
+                  )}
                 </Button>
               )}
             </header>
@@ -317,7 +360,7 @@ const JournalForm: React.FC = () => {
                 )}
               </section>
 
-              <section>
+              {/* <section>
                 <label className="block text-sm font-medium mb-2">
                   Add Images
                 </label>
@@ -368,7 +411,7 @@ const JournalForm: React.FC = () => {
                     </label>
                   </div>
                 </div>
-              </section>
+              </section> */}
 
               <footer className="flex justify-between gap-4 pt-6">
                 <button
@@ -378,16 +421,21 @@ const JournalForm: React.FC = () => {
                 >
                   Cancel
                 </button>
+
                 <button
                   type="submit"
-                  disabled={!content.trim()}
+                  disabled={isDisabled}
                   className={`min-w-[128px] px-6 py-3 rounded-lg font-semibold flex items-center justify-center transition ${
                     !content.trim()
                       ? "bg-muted text-muted-foreground cursor-not-allowed opacity-60"
                       : "bg-primary hover:bg-primary/90 text-primary-foreground"
                   }`}
                 >
-                  <Save className="w-4 h-4 mr-2" />
+                  {isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 w-4 h-4" />
+                  )}
                   {isEditing ? "Update Entry" : "Save Entry"}
                 </button>
               </footer>
@@ -401,6 +449,7 @@ const JournalForm: React.FC = () => {
               message="Are you sure you want to delete this journal entry? This action
                       cannot be undone."
               confirmMessage="Delete"
+              loading={deleteMutation.isPending}
             />
           </>
         )}

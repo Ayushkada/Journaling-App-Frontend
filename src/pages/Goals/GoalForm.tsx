@@ -5,7 +5,7 @@ import {
   useOutletContext,
   Link,
 } from "react-router-dom";
-import { Save, Trash2 } from "lucide-react";
+import { Loader2, Save, Trash2 } from "lucide-react";
 import {
   createGoal,
   deleteGoal,
@@ -17,34 +17,34 @@ import {
   baseCategories,
   baseCategoryColors,
   fallbackCategoryColors,
-} from "@/config/categoryColors";
+} from "@/constants/categoryColors";
 import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { FinishByDateField } from "@/components/ui/DatePicker";
 import { CategoryPicker } from "@/components/ui/CategoryPicker";
 import { format } from "date-fns";
 import { SearchComboBox } from "@/components/ui/SearchCombobox";
-import { JournalEntryBase } from "@/types/journal";
 import { getUpdatedText, navigateWithUnsavedCheck } from "@/utils/helpers";
-
-interface OutletContext {
-  goals: GoalBase[];
-  setGoals: React.Dispatch<React.SetStateAction<GoalBase[]>>;
-  setGoalTitle: (title: string) => void;
-  setHasUnsavedChanges: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingNav: (link: string) => void;
-  hasUnsavedChanges: boolean;
-  journals: JournalEntryBase[];
-}
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useIsMobile } from "@/hooks/useMobile";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { GoalLayoutContext } from "./GoalLayout";
 
 const GoalForm: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams<{ id?: string }>();
   const isEditing = Boolean(id);
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
+
+  const {
+    goals,
+    journals,
+    setGoalTitle,
+    hasUnsavedChanges,
+    setHasUnsavedChanges,
+    setPendingNav,
+  } = useOutletContext<GoalLayoutContext>();
 
   // Form state
-  const [loading, setLoading] = useState(isEditing);
-  const [goal, setGoal] = useState<GoalBase | null>(null);
   const [content, setContent] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
@@ -56,33 +56,36 @@ const GoalForm: React.FC = () => {
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
 
-  const {
-    goals,
-    setGoals,
-    setGoalTitle,
-    setHasUnsavedChanges,
-    setPendingNav,
-    hasUnsavedChanges,
-    journals,
-  } = useOutletContext<OutletContext>();
+  const queryClient = useQueryClient();
 
   // Fetch goal when editing
+  const {
+    data: goal,
+    isLoading,
+    error,
+  } = useQuery<GoalBase>({
+    queryKey: ["goal", id],
+    queryFn: () => getGoalById(id!),
+    enabled: isEditing && !!id,
+  });
+
   useEffect(() => {
-    if (isEditing && id) {
-      getGoalById(id)
-        .then((goal: GoalBase) => {
-          setGoal(goal);
-          setContent(goal.content);
-          setCategories(goal.category || []);
-          setNotes(goal.notes || "");
-          setProgress(goal.progress_score);
-          setDueDate(goal.time_limit ? goal.time_limit.slice(0, 10) : "");
-          setRelatedEntryIds(goal.related_entry_ids || []);
-        })
-        .catch((err) => console.error("Error fetching goal:", err))
-        .finally(() => setLoading(false));
+    if (isEditing && goal) {
+      setContent(goal.content);
+      setCategories(goal.category || []);
+      setNotes(goal.notes || "");
+      setProgress(goal.progress_score);
+      setDueDate(goal.time_limit ? goal.time_limit.slice(0, 10) : "");
+      setRelatedEntryIds(goal.related_entry_ids || []);
+    } else if (!isEditing) {
+      setContent("");
+      setCategories([]);
+      setNotes("");
+      setProgress(0);
+      setDueDate("");
+      setRelatedEntryIds([]);
     }
-  }, [isEditing, id]);
+  }, [isEditing, goal, id]);
 
   useEffect(() => {
     setGoalTitle(content);
@@ -132,6 +135,51 @@ const GoalForm: React.FC = () => {
     }
   }, [notes]);
 
+  // Mutations
+  const createMutation = useMutation({
+    mutationFn: (payload: GoalCreate) => createGoal(payload),
+    onSuccess: (created) => {
+      setHasUnsavedChanges(false);
+      setGoalTitle("");
+      queryClient.invalidateQueries({ queryKey: ["goals"] });
+      navigate(`/goals/${created.id}`);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: GoalUpdate }) =>
+      updateGoal(id, payload),
+    onSuccess: () => {
+      setHasUnsavedChanges(false);
+      setGoalTitle("");
+      queryClient.invalidateQueries({ queryKey: ["goals"] });
+      queryClient.invalidateQueries({ queryKey: ["goal", id] });
+      navigate(`/goals/${id}`);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (goalId: string) => deleteGoal(goalId),
+    onSuccess: (_, deletedId) => {
+      setHasUnsavedChanges(false);
+      setGoalTitle("");
+      queryClient.setQueryData(["goals"], (old: GoalBase[] = []) =>
+        old.filter((j) => j.id !== deletedId)
+      );
+      queryClient.invalidateQueries({ queryKey: ["goals"] });
+      queryClient.invalidateQueries({ queryKey: ["goal", deletedId] });
+      // Find newest goal to show after delete
+      const updated = queryClient.getQueryData<GoalBase[]>(["goals"]) || [];
+      const next = updated
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )[0];
+      navigate(next ? `/goals/${next.id}` : "/goals");
+    },
+  });
+
   const handleCancel = () => {
     setGoalTitle("");
     const fallback = [...goals].sort(
@@ -151,21 +199,9 @@ const GoalForm: React.FC = () => {
   };
 
   const handleDelete = async () => {
-    if (!goalToDelete) return;
-    try {
-      await deleteGoal(goalToDelete);
-      const updated = goals.filter((j) => j.id !== goalToDelete);
-      setGoals(updated);
-      const next = updated.sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )[0];
-      navigate(next ? `/goals/${next.id}` : "/goals");
-    } catch (e) {
-      console.error(e);
-    } finally {
+    if (goalToDelete) {
+      deleteMutation.mutate(goalToDelete);
       setGoalToDelete(null);
-      setGoalTitle("");
     }
   };
 
@@ -182,36 +218,23 @@ const GoalForm: React.FC = () => {
       related_entry_ids: relatedEntryIds.length ? relatedEntryIds : null,
     };
 
-    try {
-      if (isEditing && id) {
-        const completedAt = progress === 100 ? new Date().toISOString() : null;
+    if (isEditing && id) {
+      const completedAt = progress === 100 ? new Date().toISOString() : null;
 
-        const updatePayload: GoalUpdate = {
-          ...payload,
-          completed_at: completedAt,
-          updated_at: new Date().toISOString(),
-        };
-        const updated = await updateGoal(id, updatePayload);
-        setGoals((prev) =>
-          prev.map((j) => (j.id === id ? { ...j, ...updated } : j))
-        );
-        navigate(`/goals/${id}`);
-      } else {
-        const createPayload: GoalCreate = {
-          ...payload,
-          created_at: new Date().toISOString(),
-          ai_generated: false as const,
-          verified: true,
-        };
-        const created = await createGoal(createPayload);
-        setGoals((prev) => [created, ...prev]);
-        navigate(`/goals/${created.id}`);
-      }
-    } catch (e) {
-      console.error("Failed to save goal:", e);
-    } finally {
-      setGoalTitle("");
-      setHasUnsavedChanges(false);
+      const updatePayload: GoalUpdate = {
+        ...payload,
+        completed_at: completedAt,
+        updated_at: new Date().toISOString(),
+      };
+      updateMutation.mutate({ id, payload: updatePayload });
+    } else {
+      const createPayload: GoalCreate = {
+        ...payload,
+        created_at: new Date().toISOString(),
+        ai_generated: false as const,
+        verified: true,
+      };
+      createMutation.mutate(createPayload);
     }
   };
 
@@ -225,13 +248,20 @@ const GoalForm: React.FC = () => {
     setRelatedEntryIds((prev) => prev.filter((id) => id !== rid));
   };
 
+  const isPending = isEditing
+    ? updateMutation.isPending
+    : createMutation.isPending;
+  const isDisabled = !content.trim() || isPending;
+
   return (
     <main className="min-h-screen bg-background flex" role="main">
       <section className="flex-1 p-8 w-full max-w-7xl mx-auto">
-        {loading ? (
+        {isLoading && !goal ? (
           <div className="min-h-screen flex items-center justify-center px-4">
             <p>Loading…</p>
           </div>
+        ) : error ? (
+          <div className="text-red-500">Failed to load goal.</div>
         ) : (
           <>
             <header className="flex flex-col sm:flex-row justify-between items-start gap-4">
@@ -272,7 +302,6 @@ const GoalForm: React.FC = () => {
               onSubmit={handleSubmit}
               className="bg-card rounded-xl shadow-lg border p-8 space-y-6 mt-4"
             >
-              {/* Goal Content */}
               <section>
                 <label className="block text-sm font-medium mb-2">
                   Goal Details *
@@ -292,7 +321,6 @@ const GoalForm: React.FC = () => {
                 />
               </section>
 
-              {/* Notes / Progress Notes */}
               <section>
                 <label className="block text-sm font-medium mb-2">
                   Notes / Progress
@@ -312,7 +340,6 @@ const GoalForm: React.FC = () => {
                 />
               </section>
 
-              {/* Category Picker */}
               <section>
                 <label className="block text-sm font-medium mb-2">
                   Categories
@@ -326,7 +353,6 @@ const GoalForm: React.FC = () => {
                 />
               </section>
 
-              {/* Progress Score */}
               <section>
                 <label className="block text-sm font-medium mb-2">
                   Progress: {progress}%
@@ -344,16 +370,13 @@ const GoalForm: React.FC = () => {
                 />
               </section>
 
-              {/* Target Date */}
               <FinishByDateField dueDate={dueDate} setDueDate={setDueDate} />
 
-              {/* Related Journals */}
               <section>
                 <label className="block text-sm font-medium mb-2">
                   Related Journal Entries
                 </label>
 
-                {/* Badge List (same style as CategoryPicker, just no color variants) */}
                 {relatedEntryIds.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {relatedEntryIds.map((rid) => {
@@ -388,7 +411,6 @@ const GoalForm: React.FC = () => {
                   </div>
                 )}
 
-                {/* Search ComboBox */}
                 <SearchComboBox
                   items={journalOptions}
                   placeholder="Search journal titles…"
@@ -400,7 +422,6 @@ const GoalForm: React.FC = () => {
                 />
               </section>
 
-              {/* Action Buttons */}
               <footer className="flex justify-between gap-4 pt-6">
                 <button
                   type="button"
@@ -418,7 +439,11 @@ const GoalForm: React.FC = () => {
                       : "bg-primary hover:bg-primary/90 text-primary-foreground"
                   }`}
                 >
-                  <Save className="w-4 h-4 mr-2" />
+                  {isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 w-4 h-4" />
+                  )}
                   {isEditing ? "Update Goal" : "Save Goal"}
                 </button>
               </footer>
@@ -431,6 +456,7 @@ const GoalForm: React.FC = () => {
               title="Delete Goal?"
               message="Are you sure you want to delete this goal? This action cannot be undone."
               confirmMessage="Delete"
+              loading={deleteMutation.isPending}
             />
           </>
         )}

@@ -1,81 +1,70 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import React, { useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { Edit, Trash2 } from "lucide-react";
-import {
-  getJournalById,
-  deleteJournal,
-  getAllJournals,
-} from "@/lib/journalService";
+import { getJournalById, deleteJournal } from "@/lib/journalService";
 import type { JournalEntryBase } from "@/types/journal";
 import { Button } from "@/components/ui/Button";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { format } from "date-fns";
 import { getUpdatedText } from "@/utils/helpers";
-
-type OutletCtx = {
-  journals: JournalEntryBase[];
-  setJournals: React.Dispatch<React.SetStateAction<JournalEntryBase[]>>;
-};
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const JournalView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [journal, setJournal] = useState<JournalEntryBase | null>(null);
-  const [loading, setLoading] = useState(true);
   const [toDelete, setToDelete] = useState<string | null>(null);
 
-  const { journals, setJournals } = useOutletContext<OutletCtx>();
+  const queryClient = useQueryClient();
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [all, single] = await Promise.all([
-        getAllJournals(),
-        id ? getJournalById(id) : Promise.resolve(null),
-      ]);
-      setJournals(all);
-      if (single) setJournal(single);
-    } catch (e) {
-      console.error("Fetch error", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, setJournals]);
+  // Get single journal
+  const {
+    data: journal,
+    isLoading,
+    error,
+  } = useQuery<JournalEntryBase>({
+    queryKey: ["journal", id],
+    queryFn: () => (id ? getJournalById(id) : null),
+    enabled: !!id,
+  });
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const confirmDelete = useCallback(async () => {
-    if (!toDelete) return;
-    try {
-      await deleteJournal(toDelete);
-      const updated = journals.filter((j) => j.id !== toDelete);
-      setJournals(updated);
+  const deleteMutation = useMutation({
+    mutationFn: (journalId: string) => deleteJournal(journalId),
+    onSuccess: async (_, deletedId) => {
+      // Invalidate journals list and this journal
+      await queryClient.invalidateQueries({ queryKey: ["journals"] });
+      await queryClient.invalidateQueries({ queryKey: ["journal", deletedId] });
+      // Get the updated journals (from cache or refetch)
+      const journals =
+        queryClient.getQueryData<JournalEntryBase[]>(["journals"]) || [];
+      const updated = journals.filter((j) => j.id !== deletedId);
       const next = updated
         .slice()
         .sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
         )[0];
       navigate(next ? `/journals/${next.id}` : "/journals");
-    } catch (e) {
-      console.error("Delete error", e);
-    } finally {
+    },
+  });
+
+  const confirmDelete = () => {
+    if (toDelete) {
+      deleteMutation.mutate(toDelete);
       setToDelete(null);
     }
-  }, [toDelete, journals, navigate, setJournals]);
+  };
 
   return (
     <main className="bg-background flex flex-1 p-8" role="main">
       <article className="max-w-7xl mx-auto space-y-6 w-full">
-        {loading && !journal ? (
+        {isLoading && !journal ? (
           <div className="min-h-screen flex items-center justify-center px-4">
             <p>Loading…</p>
           </div>
+        ) : error ? (
+          <div className="text-red-500">Failed to load journal.</div>
         ) : (
           <>
-            {/* Header */}
             <header className="flex flex-col sm:flex-row justify-between items-start gap-4">
               <div className="space-y-2">
                 <h1 className="text-4xl font-bold">
@@ -102,12 +91,14 @@ const JournalView: React.FC = () => {
                   variant="ghost"
                   onClick={() => navigate(`/journals/${journal.id}/edit`)}
                   aria-label="Edit journal entry"
+                  disabled={isLoading}
                 >
                   <Edit className="w-4 h-4" />
                 </Button>
                 <Button
                   size="icon"
                   variant="ghost"
+                  disabled={deleteMutation.isPending}
                   className="text-destructive hover:text-destructive"
                   onClick={() => setToDelete(journal.id)}
                   aria-label="Delete journal entry"
@@ -117,7 +108,6 @@ const JournalView: React.FC = () => {
               </div>
             </header>
 
-            {/* Emojis */}
             {journal.emojis?.length > 0 && (
               <section
                 aria-label="Journal emojis"
@@ -129,8 +119,7 @@ const JournalView: React.FC = () => {
               </section>
             )}
 
-            {/* Images */}
-            {journal.images?.length > 0 && (
+            {/* {journal.images?.length > 0 && (
               <section
                 aria-label="Journal images"
                 className="flex overflow-x-auto space-x-4 py-2"
@@ -144,9 +133,8 @@ const JournalView: React.FC = () => {
                   />
                 ))}
               </section>
-            )}
+            )} */}
 
-            {/* Content */}
             <section
               aria-label="Journal content"
               className="bg-card border rounded-xl p-6 whitespace-pre-wrap break-words hyphens-auto"
@@ -164,6 +152,7 @@ const JournalView: React.FC = () => {
         title="Delete Journal Entry?"
         message="Are you sure you want to delete this journal entry? This action cannot be undone."
         confirmMessage="Delete"
+        loading={deleteMutation.isPending}
       />
     </main>
   );

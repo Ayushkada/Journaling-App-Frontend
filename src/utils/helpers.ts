@@ -1,7 +1,7 @@
 import {
   baseCategoryColors,
   fallbackCategoryColors,
-} from "@/config/categoryColors";
+} from "@/constants/categoryColors";
 import { format, formatDistanceToNowStrict } from "date-fns";
 
 /**

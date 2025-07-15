@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Sidebar from "../../components/layout/Sidebar";
 import type { JournalEntryBase } from "@/types/journal";
@@ -42,11 +42,16 @@ const JournalSidebar: React.FC<Props> = ({
     [hasUnsavedChanges, navigate, setPendingNav]
   );
 
-  const sorted = React.useMemo(
+  const sorted = useMemo(
     () =>
-      [...journals].sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      ),
+      [...journals].sort((a, b) => {
+        const getSortDate = (entry: JournalEntryBase) =>
+          entry.updated_date
+            ? new Date(entry.updated_date)
+            : new Date(entry.date);
+
+        return getSortDate(b).getTime() - getSortDate(a).getTime();
+      }),
     [journals]
   );
 

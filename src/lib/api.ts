@@ -16,8 +16,8 @@ export const setAccessToken = (token: string | null) => {
 };
 
 const api = axios.create({
-  baseURL: "https://ave-refugees-entertainment-malaysia.trycloudflare.com",
-  withCredentials: true, // send refresh-token cookie
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  withCredentials: true,
 });
 
 // Attach Bearer token on each request
@@ -35,8 +35,6 @@ api.interceptors.response.use(
     error: AxiosError & { config: AxiosRequestConfig & { _retry?: boolean } }
   ) => {
     const originalRequest = error.config;
-
-    // Only retry once, and skip if we're already calling refresh
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
@@ -44,21 +42,17 @@ api.interceptors.response.use(
     ) {
       originalRequest._retry = true;
       try {
-        // Try refreshing the access token
         const { access_token } = await refreshToken();
         setAccessToken(access_token);
 
-        // Update the Authorization header for the retry
         if (originalRequest.headers) {
           originalRequest.headers.Authorization = `Bearer ${access_token}`;
         }
 
-        // Retry the original request with new token
         return api(originalRequest);
       } catch (_err) {
-        // Refresh failed: clear token and redirect to login
         setAccessToken(null);
-        window.location.href = "/auth";
+        return Promise.reject(error);
       }
     }
 

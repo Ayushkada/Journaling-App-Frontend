@@ -1,10 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Search, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/Input";
@@ -12,94 +6,77 @@ import { Button } from "@/components/ui/Button";
 import { JournalCard } from "@/components/ui/JournalCard";
 import { deleteJournal, getAllJournals } from "@/lib/journalService";
 import type { JournalEntryBase } from "@/types/journal";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { format } from "date-fns";
-
-const LIMIT = 20;
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useAuth } from "@/provider";
 
 const Journals: React.FC = () => {
-  const [journals, setJournals] = useState<JournalEntryBase[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [journalToDelete, setJournalToDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const queryClient = useQueryClient();
+  const { authStatus } = useAuth();
 
-  const observerRef = useRef<HTMLDivElement | null>(null);
+  const { data, isLoading, error } = useQuery<JournalEntryBase[]>({
+    queryKey: ["journals"],
+    queryFn: () => getAllJournals(),
+    enabled: authStatus === "authenticated",
+    staleTime: 60 * 1000, // 1 min cache
+  });
 
-  const fetchPage = useCallback(async () => {
-    setLoading(true);
-    try {
-      const page = await getAllJournals(offset, LIMIT);
-      setJournals((prev) => {
-        const existingIds = new Set(prev.map((j) => j.id));
-        return [...prev, ...page.filter((j) => !existingIds.has(j.id))];
-      });
-      setHasMore(page.length === LIMIT);
-    } catch (e) {
-      console.error("Load error", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [offset]);
-
-  useEffect(() => {
-    fetchPage();
-  }, [fetchPage]);
-
-  // Infinite scroll
-  useEffect(() => {
-    if (loading || !hasMore) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) setOffset((prev) => prev + LIMIT);
-      },
-      { threshold: 1.0 }
-    );
-
-    const el = observerRef.current;
-    if (el) obs.observe(el);
-    return () => {
-      if (el) obs.unobserve(el);
-    };
-  }, [loading, hasMore]);
+  const journals = data ?? [];
 
   const sorted = useMemo(
     () =>
-      [...journals].sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      ),
+      [...journals].sort((a, b) => {
+        const getSortDate = (entry: JournalEntryBase) =>
+          entry.updated_date
+            ? new Date(entry.updated_date)
+            : new Date(entry.date);
+
+        return getSortDate(b).getTime() - getSortDate(a).getTime();
+      }),
     [journals]
   );
-
-  const confirmDelete = useCallback(async () => {
-    if (!deletingId) return;
-    try {
-      await deleteJournal(deletingId);
-      setJournals((prev) => prev.filter((j) => j.id !== deletingId));
-    } catch (e) {
-      console.error("Delete error", e);
-    } finally {
-      setDeletingId(null);
-    }
-  }, [deletingId]);
 
   const filteredJournals = useMemo(() => {
     const lowerQuery = query.toLowerCase();
     return sorted.filter(
       (j) =>
-        j.title?.toLowerCase().includes(lowerQuery) ||
-        j.content.toLowerCase().includes(lowerQuery)
+        j.content.toLowerCase().includes(lowerQuery) ||
+        j.title?.toLowerCase().includes(lowerQuery)
     );
   }, [query, sorted]);
+
+  // Delete journal mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteJournal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+    },
+  });
+
+  const confirmDelete = useCallback(() => {
+    if (journalToDelete) deleteMutation.mutate(journalToDelete);
+    setJournalToDelete(null);
+  }, [journalToDelete, deleteMutation]);
+
+  const lowerQuery = query.toLowerCase();
+  const results = journals.filter(
+    (j) =>
+      j.content.toLowerCase().includes(lowerQuery) ||
+      j.title?.toLowerCase().includes(lowerQuery)
+  );
 
   return (
     <main className="flex-1 p-8" role="main">
       <section className="max-w-7xl mx-auto w-full">
-        {loading && journals.length === 0 ? (
+        {isLoading && !data ? (
           <div className="min-h-screen flex items-center justify-center px-4">
             <p>Loading…</p>
           </div>
+        ) : error ? (
+          <div className="text-red-500">Failed to load journals.</div>
         ) : (
           <>
             <header className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-8">
@@ -133,7 +110,7 @@ const Journals: React.FC = () => {
               </div>
             </header>
 
-            {journals.length === 0 && !loading ? (
+            {journals.length === 0 && !isLoading ? (
               <div className="col-span-full text-center text-muted-foreground text-lg py-12">
                 <p>No journal entries yet.</p>
                 <Button asChild className="mt-4">
@@ -144,10 +121,6 @@ const Journals: React.FC = () => {
                     Start your first journal
                   </Link>
                 </Button>
-              </div>
-            ) : filteredJournals.length === 0 ? (
-              <div className="col-span-full text-center text-muted-foreground text-lg py-12">
-                <p>No journals match your search.</p>
               </div>
             ) : (
               <>
@@ -163,29 +136,21 @@ const Journals: React.FC = () => {
                       emojis={j.emojis || []}
                       viewUrl={`/journals/${j.id}`}
                       editUrl={`/journals/${j.id}/edit`}
-                      onDelete={() => setDeletingId(j.id)}
+                      onDelete={() => setJournalToDelete(j.id)}
                     />
                   ))}
                 </div>
-
-                {hasMore && (
-                  <div
-                    ref={observerRef}
-                    className="w-full flex justify-center mt-6"
-                  >
-                    <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
-                  </div>
-                )}
               </>
             )}
 
             <ConfirmDialog
-              open={!!deletingId}
-              onClose={() => setDeletingId(null)}
+              open={!!journalToDelete}
+              onClose={() => setJournalToDelete(null)}
               onConfirm={confirmDelete}
               title="Delete Journal Entry?"
               message="Are you sure you want to delete this journal entry? This action cannot be undone."
               confirmMessage="Delete"
+              loading={deleteMutation.isPending}
             />
           </>
         )}

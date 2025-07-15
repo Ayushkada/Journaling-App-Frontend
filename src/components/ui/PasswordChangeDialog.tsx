@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Button } from "@/components/ui/Button";
 import { changePassword } from "@/lib/authService";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export const PasswordChangeDialog = ({
   open,
@@ -21,6 +21,7 @@ export const PasswordChangeDialog = ({
   const [showOld, setShowOld] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false); // Loading for API call
 
   const handleNext = () => {
     if (!oldPass || !newPass || !confirmPass) {
@@ -52,12 +53,15 @@ export const PasswordChangeDialog = ({
   };
 
   const handleChange = async () => {
+    setLoading(true);
     try {
       await changePassword(oldPass, newPass);
       setStep("success");
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Password change failed.");
       setStep("error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -67,6 +71,7 @@ export const PasswordChangeDialog = ({
     setConfirmPass("");
     setError("");
     setStep("form");
+    setLoading(false);
     onClose();
   };
 
@@ -84,7 +89,7 @@ export const PasswordChangeDialog = ({
 
           {step === "form" && (
             <>
-              {/** Old Password */}
+              {/* Old Password */}
               <div className="relative mb-3">
                 <input
                   type={showOld ? "text" : "password"}
@@ -105,7 +110,7 @@ export const PasswordChangeDialog = ({
                 )}
               </div>
 
-              {/** New Password */}
+              {/* New Password */}
               <div className="relative mb-3">
                 <input
                   type={showNew ? "text" : "password"}
@@ -126,7 +131,7 @@ export const PasswordChangeDialog = ({
                 )}
               </div>
 
-              {/** Confirm Password */}
+              {/* Confirm Password */}
               <div className="relative mb-6">
                 <input
                   type={showConfirm ? "text" : "password"}
@@ -162,11 +167,22 @@ export const PasswordChangeDialog = ({
                 Are you sure you want to change your password?
               </p>
               <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={reset}>
+                <Button variant="outline" onClick={reset} disabled={loading}>
                   Cancel
                 </Button>
-                <Button variant="destructive" onClick={handleChange}>
-                  Confirm
+                <Button
+                  variant="destructive"
+                  onClick={handleChange}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-1">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Changing…
+                    </span>
+                  ) : (
+                    "Confirm"
+                  )}
                 </Button>
               </div>
             </>

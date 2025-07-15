@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   useParams,
   useLocation,
@@ -10,50 +10,51 @@ import JournalSidebarList from "@/pages/Journals/JournalSidebar";
 import { getAllJournals } from "@/lib/journalService";
 import { Button } from "@/components/ui/Button";
 import type { JournalEntryBase } from "@/types/journal";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/provider";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
+export interface JournalLayoutContext {
+  journals: JournalEntryBase[];
+  journalTitle: string;
+  setJournalTitle: (title: string) => void;
+  hasUnsavedChanges: boolean;
+  setHasUnsavedChanges: (dirty: boolean) => void;
+  setPendingNav: (nav: string | null) => void;
+}
 
 const JournalLayout: React.FC = () => {
   const { id } = useParams<{ id?: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const { authStatus } = useAuth();
 
-  const [journals, setJournals] = useState<JournalEntryBase[]>([]);
-  const [journalTitle, setJournalTitle] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [pendingNav, setPendingNav] = useState<string | null>(null);
-
+  const [journalTitle, setJournalTitle] = useState("");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pendingNav, setPendingNav] = useState<string | null>(null);
 
   const isAddPage = useMemo(
     () => location.pathname === "/journals/add",
     [location.pathname]
   );
 
-  const exists = useMemo(() => {
-    return !id || journals.some((j) => j.id === id);
-  }, [id, journals]);
+  const {
+    data: journals = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["journals"],
+    queryFn: () => getAllJournals(),
+    enabled: authStatus === "authenticated",
+    staleTime: 60 * 1000, // 1 min cache
+  });
 
-  // Fetch journals on mount
-  const fetchJournals = useCallback(async () => {
-    setLoading(true);
-    try {
-      const all = await getAllJournals(0, 100);
-      setJournals(all);
-    } catch (e) {
-      console.error("Failed to load journals", e);
-      setError("Unable to load journals.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const exists = useMemo(
+    () => !id || journals.some((j) => j.id === id),
+    [id, journals]
+  );
 
-  useEffect(() => {
-    fetchJournals();
-  }, [fetchJournals]);
-
-  // Automatically navigate if no unsaved changes
+  // Handle guarded navigation away
   useEffect(() => {
     if (pendingNav && !hasUnsavedChanges) {
       navigate(pendingNav);
@@ -62,10 +63,9 @@ const JournalLayout: React.FC = () => {
     }
   }, [pendingNav, hasUnsavedChanges, navigate]);
 
-  const outletContext = useMemo(
+  const outletContext = useMemo<JournalLayoutContext>(
     () => ({
       journals,
-      setJournals,
       journalTitle,
       setJournalTitle,
       hasUnsavedChanges,
@@ -85,11 +85,13 @@ const JournalLayout: React.FC = () => {
         setPendingNav={setPendingNav}
       />
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? (
+      <main className="flex-1 overflow-y-auto p-6">
+        {isLoading ? (
           <p>Loading journals...</p>
         ) : error ? (
-          <p className="text-red-500">{error}</p>
+          <p className="text-red-500">
+            {error.message || "Unable to load journals."}
+          </p>
         ) : !exists ? (
           <div className="text-center text-muted-foreground text-lg py-12">
             <p>No journal found.</p>
@@ -100,13 +102,11 @@ const JournalLayout: React.FC = () => {
         ) : (
           <Outlet context={outletContext} />
         )}
-      </div>
+      </main>
 
       <ConfirmDialog
         open={!!pendingNav && hasUnsavedChanges}
-        onClose={() => {
-          setPendingNav(null);
-        }}
+        onClose={() => setPendingNav(null)}
         onConfirm={() => {
           if (pendingNav) {
             navigate(pendingNav);

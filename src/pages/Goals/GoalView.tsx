@@ -1,64 +1,49 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useState } from "react";
 import { useParams, useNavigate, useOutletContext } from "react-router-dom";
 import { Edit, Trash2 } from "lucide-react";
-import { useIsMobile } from "@/hooks/useMobile";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { GoalBase } from "@/types/goal";
 import type { JournalEntryBase } from "@/types/journal";
-import { deleteGoal, getAllGoals, getGoalById } from "@/lib/goalService";
-import { getAllJournals } from "@/lib/journalService";
+import { deleteGoal, getGoalById } from "@/lib/goalService";
 import { Badge } from "@/components/ui/Badge";
 import { Progress } from "@/components/ui/Progress";
-import { format, formatDistanceToNowStrict } from "date-fns";
-import { getCategoryColor } from "@/utils/helpers";
+import { format } from "date-fns";
+import { getCategoryColor, getUpdatedText } from "@/utils/helpers";
 import { Button } from "@/components/ui/Button";
-
-type OutletCtx = {
-  goals: GoalBase[];
-  setGoals: React.Dispatch<React.SetStateAction<GoalBase[]>>;
-};
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { GoalLayoutContext } from "./GoalLayout";
 
 const GoalView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
 
-  const [goal, setGoal] = useState<GoalBase | null>(null);
-  const [journals, setJournals] = useState<JournalEntryBase[]>([]);
-  const [loading, setLoading] = useState(true);
   const [toDelete, setToDelete] = useState<string | null>(null);
   const [fallbackMap, setFallbackMap] = useState<Record<string, string>>({});
 
-  const { goals, setGoals } = useOutletContext<OutletCtx>();
+  const queryClient = useQueryClient();
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [allGoals, single, allJournals] = await Promise.all([
-        getAllGoals(),
-        id ? getGoalById(id) : Promise.resolve(null),
-        getAllJournals(),
-      ]);
-      setGoals(allGoals);
-      setJournals(allJournals);
-      if (single) setGoal(single);
-    } catch (e) {
-      console.error("Fetch error", e);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, setGoals]);
+  const { journals } = useOutletContext<GoalLayoutContext>();
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  // Get single journal
+  const {
+    data: goal,
+    isLoading,
+    error,
+  } = useQuery<GoalBase>({
+    queryKey: ["goal", id],
+    queryFn: () => (id ? getGoalById(id) : null),
+    enabled: !!id,
+  });
 
-  const confirmDelete = useCallback(async () => {
-    if (!toDelete) return;
-    try {
-      await deleteGoal(toDelete);
-      const updated = goals.filter((g) => g.id !== toDelete);
-      setGoals(updated);
+  const deleteMutation = useMutation({
+    mutationFn: (goalId: string) => deleteGoal(goalId),
+    onSuccess: async (_, deletedId) => {
+      // Invalidate goals list and this journal
+      await queryClient.invalidateQueries({ queryKey: ["goals"] });
+      await queryClient.invalidateQueries({ queryKey: ["goal", deletedId] });
+      // Get the updated goals (from cache or refetch)
+      const goals = queryClient.getQueryData<GoalBase[]>(["goals"]) || [];
+      const updated = goals.filter((j) => j.id !== deletedId);
       const next = updated
         .slice()
         .sort(
@@ -66,53 +51,32 @@ const GoalView: React.FC = () => {
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )[0];
       navigate(next ? `/goals/${next.id}` : "/goals");
-    } catch (e) {
-      console.error("Delete error", e);
-    } finally {
+    },
+  });
+
+  const confirmDelete = () => {
+    if (toDelete) {
+      deleteMutation.mutate(toDelete);
       setToDelete(null);
     }
-  }, [toDelete, goals, navigate, setGoals]);
-
-  if (loading || !goal) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <p>Loading…</p>
-      </div>
-    );
-  }
+  };
 
   // find related journals
-  const related = (goal.related_entry_ids || [])
+  const related = (goal?.related_entry_ids || [])
     .map((jid) => journals.find((j) => j.id === jid))
     .filter(Boolean) as JournalEntryBase[];
-
-  const getUpdatedText = (created: string, updated?: string): string | null => {
-    if (!updated || updated === created) return null;
-
-    const updatedTime = new Date(updated);
-    const createdTime = new Date(created);
-    const diffMs = updatedTime.getTime() - createdTime.getTime();
-    const diffHours = diffMs / 36e5;
-
-    if (diffHours < 24) {
-      return `Updated ${formatDistanceToNowStrict(updatedTime, {
-        addSuffix: true,
-      })}`;
-    } else {
-      return `Updated: ${format(updatedTime, "MMMM d, yyyy 'at' hh:mm a")}`;
-    }
-  };
 
   return (
     <main className="bg-background flex flex-1 p-8" role="main">
       <article className="max-w-7xl mx-auto space-y-8 w-full">
-        {loading ? (
+        {isLoading && !goal ? (
           <div className="min-h-screen flex items-center justify-center px-4">
             <p>Loading…</p>
           </div>
+        ) : error ? (
+          <div className="text-red-500">Failed to load goal.</div>
         ) : (
           <>
-            {/* Header */}
             <header className="space-y-2">
               <div className="space-y-0">
                 <div className="flex flex-col sm:flex-row justify-between items-center">
@@ -214,7 +178,6 @@ const GoalView: React.FC = () => {
               </div>
             </header>
 
-            {/* Progress bar */}
             <section aria-label="Progress">
               <h2 className="font-semibold mb-2">Progress</h2>
               <div className="flex items-center gap-4">
@@ -227,7 +190,6 @@ const GoalView: React.FC = () => {
               </div>
             </section>
 
-            {/* Notes */}
             {goal.notes && (
               <section>
                 <h2 className="font-semibold mb-2">Notes</h2>
@@ -242,7 +204,6 @@ const GoalView: React.FC = () => {
               </section>
             )}
 
-            {/* Related Journals */}
             {related.length > 0 && (
               <section aria-label="Related Journals">
                 <h2 className="font-semibold mb-2">Related Journals</h2>
@@ -280,6 +241,7 @@ const GoalView: React.FC = () => {
         title="Delete Goal?"
         message="Are you sure you want to delete this goal? This action cannot be undone."
         confirmMessage="Delete"
+        loading={deleteMutation.isPending}
       />
     </main>
   );

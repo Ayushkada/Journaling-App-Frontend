@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { User, Trash2, LogOut } from "lucide-react";
+import { Trash2, LogOut, Pencil, Check, X, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/provider";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { Button } from "@/components/ui/Button";
 import { PasswordChangeDialog } from "@/components/ui/PasswordChangeDialog";
 import {
@@ -14,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { deleteAllGoals } from "@/lib/goalService";
 import { deleteAllJournals } from "@/lib/journalService";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const Profile = () => {
   const [name, setName] = useState("");
@@ -25,9 +25,9 @@ const Profile = () => {
   >(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
-  const [useLogout, setUseLogout] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState(false);
+  const [useLogout, setUseLogout] = useState(false);
 
   const { logout } = useAuth();
   const navigate = useNavigate();
@@ -36,10 +36,12 @@ const Profile = () => {
     const loadUser = async () => {
       try {
         const user = await getCurrentUser();
-        setName(user.name);
-        setOriginalName(user.name);
-        setEmail(user.email);
-        setOriginalEmail(user.email);
+        if (user) {
+          setName(user.name || "");
+          setOriginalName(user.name || "");
+          setEmail(user.email || "");
+          setOriginalEmail(user.email || "");
+        }
       } catch (err) {
         console.error("Failed to load user profile", err);
       }
@@ -77,7 +79,7 @@ const Profile = () => {
 
   const handleUsernameUpdate = async () => {
     try {
-      if (name !== originalName) {
+      if (name && name !== originalName) {
         await changeUsername(name);
         setOriginalName(name);
         toast.success("Username updated");
@@ -89,7 +91,7 @@ const Profile = () => {
     }
   };
 
-  const handleUsernameCancel = async () => {
+  const handleUsernameCancel = () => {
     setName(originalName);
     setIsEditingName(false);
   };
@@ -97,7 +99,7 @@ const Profile = () => {
   const handleEmailUpdate = async () => {
     setConfirmEmail(false);
     try {
-      if (email !== originalEmail) {
+      if (email && email !== originalEmail) {
         await changeEmail(email);
         setOriginalEmail(email);
         toast.success("Email updated.");
@@ -146,7 +148,6 @@ const Profile = () => {
           </div>
 
           <div className="grid gap-8">
-            {/* Personal Info */}
             <div className="bg-card rounded-xl shadow-lg border p-6">
               <h2 className="text-xl font-semibold text-card-foreground mb-6 flex items-center">
                 <User className="w-5 h-5 mr-2" />
@@ -154,7 +155,6 @@ const Profile = () => {
               </h2>
 
               <div className="space-y-4">
-                {/* Username */}
                 <div>
                   <label className="block text-sm font-medium mb-2">
                     Username
@@ -177,7 +177,7 @@ const Profile = () => {
                         isEditingName
                           ? name !== originalName
                             ? handleUsernameUpdate
-                            : () => setIsEditingName(false) // just close edit if no change
+                            : () => setIsEditingName(false)
                           : () => setIsEditingName(true)
                       }
                     >
@@ -195,7 +195,6 @@ const Profile = () => {
                   </div>
                 </div>
 
-                {/* Email */}
                 <div>
                   <label className="block text-sm font-medium mb-2">
                     Email Address
@@ -244,7 +243,6 @@ const Profile = () => {
                   />
                 </div>
 
-                {/* Password */}
                 <div>
                   <label className="block text-sm font-medium mb-2">
                     Password
@@ -272,7 +270,6 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Logout */}
             <div className="bg-card rounded-xl shadow-lg border p-6">
               <h2 className="text-xl font-semibold text-card-foreground mb-2 flex items-center">
                 <LogOut className="w-5 h-5 mr-2" />
@@ -301,7 +298,6 @@ const Profile = () => {
               />
             </div>
 
-            {/* Danger Zone */}
             <div className="bg-card rounded-xl shadow-md border border-destructive/30 p-6">
               <h2 className="text-xl font-semibold text-destructive mb-6 flex items-center">
                 <Trash2 className="w-5 h-5 mr-2" />
@@ -333,7 +329,6 @@ const Profile = () => {
             </div>
           </div>
 
-          {/* Confirm Delete Dialog */}
           <ConfirmDialog
             open={!!deleteType}
             onClose={() => setDeleteType(null)}

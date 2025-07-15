@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Sidebar from "../../components/layout/Sidebar";
 import { Plus } from "lucide-react";
@@ -43,12 +43,16 @@ const GoalSidebar: React.FC<Props> = ({
     [hasUnsavedChanges, navigate, setPendingNav]
   );
 
-  const sorted = React.useMemo(
+  const sorted = useMemo(
     () =>
-      [...goals].sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ),
+      [...goals].sort((a, b) => {
+        const getSortDate = (goal: GoalBase) =>
+          goal.updated_at
+            ? new Date(goal.updated_at)
+            : new Date(goal.created_at);
+
+        return getSortDate(b).getTime() - getSortDate(a).getTime();
+      }),
     [goals]
   );
 

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/Input";
@@ -7,46 +7,55 @@ import { Button } from "@/components/ui/Button";
 
 import { getAllGoals, deleteGoal } from "@/lib/goalService";
 import { GoalBase } from "@/types/goal";
-import { ConfirmDialog } from "@/components/ui/ConfimDialog";
 import { GoalSection } from "../../components/ui/GoalSection";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/provider";
 
 const Goals = () => {
-  const [goals, setGoals] = useState<GoalBase[]>([]);
-  const [loading, setLoading] = useState(true);
   const [goalToDelete, setGoalToDelete] = useState<string | null>(null);
-
-  const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const queryClient = useQueryClient();
+  const { authStatus } = useAuth();
 
-  useEffect(() => {
-    const fetchGoals = async () => {
-      try {
-        const data = await getAllGoals(0, 100);
-        setGoals(data);
-      } catch (err) {
-        console.error("Failed to load goals:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchGoals();
-  }, [navigate]);
+  const { data, isLoading, error } = useQuery<GoalBase[]>({
+    queryKey: ["goals"],
+    queryFn: () => getAllGoals(),
+    enabled: authStatus === "authenticated",
+    staleTime: 60 * 1000, // 1 min cache
+  });
 
-  const handleDelete = async () => {
-    if (!goalToDelete) return;
-    try {
-      await deleteGoal(goalToDelete);
-      setGoals((prev) => prev.filter((g) => g.id !== goalToDelete));
-    } catch (err) {
-      console.error("Error deleting goal:", err);
-    } finally {
-      setGoalToDelete(null);
-    }
-  };
+  const goals = data ?? [];
+
+  // Delete goal mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteGoal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["goals"] });
+    },
+  });
+
+  const confirmDelete = useCallback(() => {
+    if (goalToDelete) deleteMutation.mutate(goalToDelete);
+    setGoalToDelete(null);
+  }, [goalToDelete, deleteMutation]);
 
   const lowerQuery = query.toLowerCase();
 
-  const aiSuggested = goals.filter(
+  const sorted = useMemo(
+    () =>
+      [...goals].sort((a, b) => {
+        const getSortDate = (goal: GoalBase) =>
+          goal.updated_at
+            ? new Date(goal.updated_at)
+            : new Date(goal.created_at);
+
+        return getSortDate(b).getTime() - getSortDate(a).getTime();
+      }),
+    [goals]
+  );
+
+  const aiSuggested = sorted.filter(
     (g) =>
       g.ai_generated &&
       !g.verified &&
@@ -54,7 +63,7 @@ const Goals = () => {
         g.notes?.toLowerCase().includes(lowerQuery))
   );
 
-  const activeGoals = goals.filter(
+  const activeGoals = sorted.filter(
     (g) =>
       g.verified &&
       g.progress_score < 100 &&
@@ -63,7 +72,7 @@ const Goals = () => {
         g.notes?.toLowerCase().includes(lowerQuery))
   );
 
-  const completedGoals = goals.filter(
+  const completedGoals = sorted.filter(
     (g) =>
       g.verified &&
       g.progress_score === 100 &&
@@ -76,10 +85,12 @@ const Goals = () => {
     <div className="min-h-screen bg-background flex">
       <main className="flex-1 p-8" role="main">
         <div className="max-w-7xl mx-auto w-full">
-          {loading ? (
+          {isLoading && !goals ? (
             <div className="min-h-screen flex items-center justify-center px-4">
               <p>Loading…</p>
             </div>
+          ) : error ? (
+            <div className="text-red-500">Failed to load goals.</div>
           ) : (
             <>
               <header className="flex justify-between items-center mb-8">
@@ -144,7 +155,7 @@ const Goals = () => {
                   </div>
                 )}
 
-              {goals.length === 0 && !loading && (
+              {goals.length === 0 && !isLoading && (
                 <div className="text-center py-16" role="alert">
                   <div className="text-6xl mb-4" aria-hidden="true">
                     🎯
@@ -166,10 +177,11 @@ const Goals = () => {
               <ConfirmDialog
                 open={!!goalToDelete}
                 onClose={() => setGoalToDelete(null)}
-                onConfirm={handleDelete}
+                onConfirm={confirmDelete}
                 title="Delete Goal?"
                 message="Are you sure you want to delete this goal? This action cannot be undone."
                 confirmMessage="Delete"
+                loading={deleteMutation.isPending}
               />
             </>
           )}

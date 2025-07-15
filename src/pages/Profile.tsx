@@ -14,8 +14,12 @@ import { toast } from "sonner";
 import { deleteAllGoals } from "@/lib/goalService";
 import { deleteAllJournals } from "@/lib/journalService";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { useQueryClient } from "@tanstack/react-query";
 
 const Profile = () => {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
   const [name, setName] = useState("");
   const [originalName, setOriginalName] = useState("");
   const [email, setEmail] = useState("");
@@ -29,8 +33,7 @@ const Profile = () => {
   const [confirmEmail, setConfirmEmail] = useState(false);
   const [useLogout, setUseLogout] = useState(false);
 
-  const { logout } = useAuth();
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const loadUser = async () => {
@@ -60,13 +63,21 @@ const Profile = () => {
         await deleteAllGoals();
         await deleteAllJournals();
         await deleteAccount();
+        queryClient.removeQueries({ queryKey: ["goals"], exact: false });
+        queryClient.removeQueries({ queryKey: ["goal"], exact: false });
+        queryClient.removeQueries({ queryKey: ["journals"], exact: false });
+        queryClient.removeQueries({ queryKey: ["journal"], exact: false });
         toast.success("Account deleted");
         await handleLogout();
       } else if (deleteType === "goals") {
         await deleteAllGoals();
+        queryClient.removeQueries({ queryKey: ["goals"], exact: false });
+        queryClient.removeQueries({ queryKey: ["goal"], exact: false });
         toast.success("All goals deleted");
       } else if (deleteType === "journals") {
         await deleteAllJournals();
+        queryClient.removeQueries({ queryKey: ["journals"], exact: false });
+        queryClient.removeQueries({ queryKey: ["journal"], exact: false });
         toast.success("All journals deleted");
       }
     } catch (err) {

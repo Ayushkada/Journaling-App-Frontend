@@ -2,7 +2,7 @@
 
 A modern journaling and goal-tracking web app focused on mental wellness, built with **React**, **TypeScript**, **Vite**, **TailwindCSS**, and **ShadCN UI**. This frontend integrates with a FastAPI backend to deliver AI-powered insights on journal entries and goals.
 
-## 🌐 [Live Demo](https://journaling-app-frontend-ecru.vercel.app/)
+## 🌐 [Live Demo](https://journaling-app-frontend-ecru.vercel.app/) (Currently Offline)
 
 ---
 
